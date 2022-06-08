@@ -1,0 +1,210 @@
+variables:
+# -----------------------GENERAL VARIABLES----------------------------
+# service connection name
+- name: serviceconnection
+  value: sgtd2glbsp3finopsauth001
+
+# resource group name
+- name: resourcegroupname  
+  value: sgtd2weursgfinopscomm001
+
+# subscription Id
+- name: subscriptionid  
+  value: ebac6c00-3c2f-4d56-82c0-8057225d44fa
+
+# subscription name
+- name: subscriptionname  
+  value: sgtd2glbsubgeneriglob001
+
+# Region for ARM deployment
+- name: armregiondeployment  
+  value: West Europe
+
+# Storage Account
+- name: storageaccountname
+  value: sgtd2weustafinopscomm002
+
+# ---------------------FUNCTIONS AND DEPLOYMENT VARS---------------------
+
+# function app for historic kpis name
+- name: fctfinopscsharpname
+  value: sgtd2weuafafinopscomm001
+
+# dns name published in dns and in app gateway for csharp function
+- name: fctfinopscsharpnamepub
+  value: finops-optimization-azure.scm.sgtech.dev.corp
+
+# function app for cost ingestion name
+- name: fctfinopspowershellname
+  value: sgtd2weuafafinopscomm002
+
+# dns name published in dns and in app gateway for powershell function
+- name: fctfinopspowershellnamepub
+  value: finops2-optimization-azure.scm.sgtech.dev.corp
+
+# Publish Profile Pipeline variables placeholders
+- name: publishsettingsusercsharp
+  value : unset
+- name: publishsettingspwdcsharp
+  value : unset
+- name: publishsettingsuserps
+  value : unset
+- name: publishsettingspwdps
+  value : unset
+
+# -----------------LOG ANALYTICS PIPELINE VARIABLES--------------------
+
+- name: loganaworkspaceid
+  value : "/subscriptions/ebac6c00-3c2f-4d56-82c0-8057225d44fa/resourcegroups/sgtd2weursgfinopscomm001/providers/microsoft.operationalinsights/workspaces/sgtd2weulwkfinopscomm001"
+
+# PagoNxt workbook vars
+- name: workbookname
+  value : "TestDataDashboard"
+
+- name: workbookid
+  value : b71c3161-313c-464f-a129-39a2feb24b5b
+
+- name: generalworkbookname
+  value : "FinOpsCostOptimization"
+
+- name: generalworkbookid
+  value : 001568f1-b34c-4d3a-b2e8-b5f0b824b037
+
+# ---------------------------------------------------------------------
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - README.md
+      - Wiki-Readme/*
+      - PipelineCode/*
+
+pool:
+  name: Default
+  
+
+steps:
+# Zip PowerShell functions for deployment 
+- task: PowerShell@2
+  displayName: "Zip PowerShell Function App code"
+  inputs:
+    filePath: '$(System.DefaultWorkingDirectory)/PipelineCode/CompressFile.ps1'
+    arguments: '-filePath "$(System.DefaultWorkingDirectory)/FunctionCode/fct-finops-powershell/" -fileName "$(System.DefaultWorkingDirectory)/FunctionCode/fct-finops-powershell$(Build.BuildId).zip"'
+
+# Zip C# functions for deployment
+- task: PowerShell@2
+  displayName: "Zip C# Function App code"
+  inputs:
+    filePath: '$(System.DefaultWorkingDirectory)/PipelineCode/CompressFile.ps1'
+    arguments: '-filePath "$(System.DefaultWorkingDirectory)/FunctionCode/fct-finops-csharp/" -fileName "$(System.DefaultWorkingDirectory)/FunctionCode/fct-finops-csharp$(Build.BuildId).zip"'
+
+# Publish PowerShell Function Artifact for debugging purposes
+- task: PublishBuildArtifacts@1
+  displayName: "Publish Artifact C# Function Code"
+  inputs:
+    PathtoPublish: '$(System.DefaultWorkingDirectory)/FunctionCode/fct-finops-csharp$(Build.BuildId).zip'
+    ArtifactName: 'fct-finops-csharp$(Build.BuildId).zip'
+    publishLocation: 'Container'
+
+# Publish C# Function Artifact for debugging purposes
+- task: PublishBuildArtifacts@1
+  displayName: "Publish Artifact PowerShell Function Code"
+  inputs:
+    PathtoPublish: '$(System.DefaultWorkingDirectory)/FunctionCode/fct-finops-powershell$(Build.BuildId).zip'
+    ArtifactName: 'fct-finops-powershell$(Build.BuildId).zip'
+    publishLocation: 'Container'
+
+# Get C# Function App Publish Credentials (Username and Password) and set Environment variables for later use
+- task: AzurePowerShell@5
+  displayName: "Get C# App Function Publish Profile Credentials"
+  inputs:
+    azureSubscription: 'sgtd2glbsp3finopsauth001'
+    ScriptType: 'FilePath'
+    ScriptPath: '$(System.DefaultWorkingDirectory)/PipelineCode/GetPublishProfileAndSetVar.ps1'
+    ScriptArguments: '-appname $(fctfinopscsharpname) -rgname $(resourcegroupname) -outputuser "publishsettingsusercsharp" -outputpwd "publishsettingspwdcsharp"'
+    FailOnStandardError: true
+    azurePowerShellVersion: 'LatestVersion'
+
+# Get PowerShell Function App Publish Credentials (Username and Password) and set Environment variables for later use
+- task: AzurePowerShell@5
+  displayName: "Get PowerShell App Function Publish Profile Credentials"
+  inputs:
+    azureSubscription: 'sgtd2glbsp3finopsauth001'
+    ScriptType: 'FilePath'
+    ScriptPath: '$(System.DefaultWorkingDirectory)/PipelineCode/GetPublishProfileAndSetVar.ps1'
+    ScriptArguments: '-appname $(fctfinopspowershellname) -rgname $(resourcegroupname) -outputuser "publishsettingsuserps" -outputpwd "publishsettingspwdps"'
+    FailOnStandardError: true
+    azurePowerShellVersion: 'LatestVersion'
+
+# Refresh Storage Connection String
+
+- task: AzureCLI@2
+  displayName: "Update Connection String to Storage in Function App application settings"
+  inputs:
+    azureSubscription: 'sgtd2glbsp3finopsauth001'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      resourceGroup=$(resourcegroupname)
+      functionApp=$(fctfinopscsharpname)
+      subscription=$(subscriptionname)
+      storage=$(storageaccountname)
+      
+      connstr=$(az storage account show-connection-string --name $storage --resource-group $resourceGroup --subscription $subscription  --query connectionString --output tsv)
+      az functionapp config appsettings set --name $functionApp --resource-group $resourceGroup --settings StorageConStr=$connstr
+
+#####--- CREATE PORTUGAL DASHBOARD ---#####
+
+# replace tokens in file (Portugal)
+- task: PowerShell@2
+  inputs:
+    filePath: '$(System.DefaultWorkingDirectory)/PipelineCode/ReplaceTokensInFiles.ps1'
+    arguments: '-inputFile $(System.DefaultWorkingDirectory)/DashboardGeneral/dashboard.json -outputFile $(System.DefaultWorkingDirectory)/DashboardGeneral/dashboardtot.json -tokens @{entityjson="\`"value\`"`: \`"gts\`", \`"label\`"`: \`"TestData\`""}'
+
+- task: PublishPipelineArtifact@1
+  inputs:
+    targetPath: '$(System.DefaultWorkingDirectory)'
+    artifact: 'test'
+    publishLocation: 'pipeline'
+
+# deploy PagoNxt dashboard to existing Log Analytics workspace (Portugal)
+- task: AzureResourceManagerTemplateDeployment@3
+  displayName: 'Log Analytics Workbook PagoNxt FinOps Dashboard deployment'  
+  inputs:
+    deploymentScope: 'Resource Group'
+    azureResourceManagerConnection: 'sgtd2glbsp3finopsauth001'
+    subscriptionId: 'ebac6c00-3c2f-4d56-82c0-8057225d44fa'
+    action: 'Create Or Update Resource Group'
+    resourceGroupName: '$(resourcegroupname)'
+    location: '$(armregiondeployment)'
+    templateLocation: 'Linked artifact'
+    csmFile: '$(System.DefaultWorkingDirectory)/DashboardGeneral/dashboardtot.json'
+    overrideParameters: '-workbookDisplayName $(workbookname) -workbookSourceId $(loganaworkspaceid) -workbookId $(workbookid) -workbookType workbook'
+    deploymentMode: 'Incremental'
+
+
+# Deploy C# Function App Zip package using Zipdeploy KUDU rest APIs using Publish Profile credentials
+- task: AzurePowerShell@5
+  displayName: "Deploy Csharp function code via Kudu APIs"
+  inputs:
+    azureSubscription: 'sgtd2glbsp3finopsauth001'
+    ScriptType: 'FilePath'
+    ScriptPath: '$(System.DefaultWorkingDirectory)/PipelineCode/KuduDeploy.ps1'
+    ScriptArguments: '-webappname "finops-optimization-azure.scm.sgtech.dev.corp" -username `$(publishsettingsusercsharp) -password "$(publishsettingspwdcsharp)" -filePath "$(System.DefaultWorkingDirectory)/FunctionCode/fct-finops-csharp$(Build.BuildId).zip"'
+    azurePowerShellVersion: 'LatestVersion'
+  
+
+# Deploy C# Function App Zip package using Zipdeploy KUDU rest APIs using Publish Profile credentials
+
+- task: AzurePowerShell@5
+  displayName: "Deploy Powershell function code via Kudu APIs"
+  inputs:
+    azureSubscription: 'sgtd2glbsp3finopsauth001'
+    ScriptType: 'FilePath'
+    ScriptPath: '$(System.DefaultWorkingDirectory)/PipelineCode/KuduDeploy.ps1'
+    ScriptArguments: '-webappname "finops2-optimization-azure.scm.sgtech.dev.corp" -username `$(publishsettingsuserps) -password "$(publishsettingspwdps)" -filePath "$(System.DefaultWorkingDirectory)/FunctionCode/fct-finops-powershell$(Build.BuildId).zip"'
+    azurePowerShellVersion: 'LatestVersion'
+  
