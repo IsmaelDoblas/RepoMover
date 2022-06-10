@@ -1,0 +1,140 @@
+Premium Storage Accounts:
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Resources
+| where type == 'microsoft.storage/storageaccounts' 
+// check for options with replication
+| where sku startswith 'Premium' 
+| summarize quantity=tostring(count())
+
+Premium Snapshots:
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Resources 
+| where type=='microsoft.compute/snapshots'
+// Premium SKUs or redundancy options check
+| where sku contains ('Premium') 
+| summarize quantity=tostring(count())
+
+Premium Managed Disks: 
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Resources 
+| where type=='microsoft.compute/disks'
+| project name,type,tenantId,grupo,resourceGroup,subscription,relatedTo=case(isnotempty(managedBy),managedBy,'N/A'),diskstate=tostring(properties['diskState']),sku
+| where sku contains 'Premium'
+// habría que filtrar por entornos no productivos
+| summarize quantity=tostring(count())
+
+Storage accounts with redundancy: 
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Resources
+| where type == 'microsoft.storage/storageaccounts' 
+// check for options with replication
+| where ((sku contains 'GRS') or (sku contains 'GZRS') or (sku contains 'ZRS'))
+// habría que filtrar por entornos no productivos
+| summarize quantity=tostring(count())
+
+Snapshots with redundancy:
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Resources 
+| extend timeCreated = todatetime(properties.['timeCreated']) 
+| extend diff = tolong(format_timespan(now()-timeCreated, 'ddd')) 
+| where type=='microsoft.compute/snapshots' and diff > 31
+// Premium SKUs or redundancy options check
+| where sku contains ('ZRS') or sku contains ('GRS') or sku contains ('GZRS')
+| summarize quantity=tostring(count())
+
+Managed Disks with redundancy:
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Resources
+| where type == 'microsoft.compute/disks' 
+// check for options with replication
+| where ((sku contains 'GRS') or (sku contains 'GZRS') or (sku contains 'ZRS'))
+| summarize quantity=tostring(count())
+
+Unattached Managed Disks:
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Resources 
+| where type=='microsoft.compute/disks'
+| project name,type,tenantId,grupo,resourceGroup,subscription,relatedTo=case(isnotempty(managedBy),managedBy,'N/A'),diskstate=tostring(properties['diskState']) 
+| where relatedTo == 'N/A' and diskstate == 'Unattached'
+| summarize quantity=tostring(count())
+
+Orphaned Static Public Ips:
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+resources 
+| where type=='microsoft.network/publicipaddresses' 
+| project name,type,location,resourceGroup,grupo,name1,subscriptionId,managedBy,allocation=properties.publicIPAllocationMethod,ipConfig=properties.ipConfiguration.id 
+| where isempty(ipConfig) and tostring(allocation)=='Static'
+| summarize quantity=tostring(count())
+
+Hybrid Benefit on Virtual Machines:
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Resources 
+| where type == 'microsoft.compute/virtualmachines'
+| extend licenseType = tostring(properties.['licenseType'])
+| extend publisher = tostring(properties.['storageProfile']['imageReference']['publisher'])
+| extend os = case(
+            properties.storageProfile.osDisk.osType =~ 'Windows', 'Windows',
+            properties.storageProfile.osDisk.osType =~ 'Linux', 'Linux',
+            '-'
+        )
+| extend hybridbenefit = case((licenseType in ('Windows_Server','Windows_Client','RHEL_BYOS','SLES_BYOS')),'Activated','Not activated')
+| where os == 'Windows'
+| summarize quantity=count() by hybridbenefit
+
+SQL Server by SKU:
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Resources 
+| where type=='microsoft.sqlvirtualmachine/sqlvirtualmachines'
+| join kind = inner (ResourceContainers | where type=='microsoft.resources/subscriptions' | where({VerticalCode} == 'MER' and substring(name,0,3) in ('gms')) or ({VerticalCode} == 'TRA' and substring(name,0,3) in ('gts')) or ({VerticalCode} == 'CON' and substring(name,0,3) in ('pgx','ssd')) or ({VerticalCode} == 'ALL' and substring(name,0,3) in ('gms','gts','pgx','ssd')) | project id,name,subscriptionId) on subscriptionId
+| extend licenseType=tostring(properties['sqlServerLicenseType']),sqlImageSku=tostring(properties['sqlImageSku']),sqlImageOffer=tostring(properties['sqlImageOffer']),vmName=split(tostring(properties['virtualMachineResourceId']),'/')[-1]
+| summarize quantity=count() by sqlImageSku
+
+
+Azure SQL Server by type:
+---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Resources 
+| where type=='microsoft.sql/servers/databases' or type =='microsoft.sql/servers/elasticpools'
+
+| join kind = inner (ResourceContainers | where type=='microsoft.resources/subscriptions' | where ({VerticalCode} == 'MER' and substring(name,0,3) in ('gms')) or ({VerticalCode} == 'TRA' and substring(name,0,3) in ('gts')) or ({VerticalCode} == 'CON' and substring(name,0,3) in ('pgx','ssd')) or ({VerticalCode} == 'ALL' and substring(name,0,3) in ('gms','gts','pgx','ssd')) | project id,name,subscriptionId) on subscriptionId
+
+| where name != 'master'
+| extend skuname=tostring(sku['name'])
+| extend skucapacity=tostring(sku['capacity'])
+| extend zoneRedundant=properties['zoneRedundant']
+
+| summarize quantity=countif(skuname != 'ElasticPool') by skuname
+
+
+Detectar los recursos sin Tag:
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Resources
+| where isempty(tags)
+
+Recuento de cuantos Tags de cada tipo hay
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Resources
+| where isnotempty(tags)
+| project tags
+| mvexpand tags
+| extend tagKey = tostring(bag_keys(tags)[0])
+| extend tagValue = tostring(tags[tagKey])
+| summarize Qty=count() by tagKey
+| order by Qty desc
+
+
+
+
+
