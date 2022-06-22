@@ -1,0 +1,17 @@
+$rg = 'finops-assets'
+$ws = 'LOG-WS01-TEST'
+$fecha = get-date
+
+$query = get-content .\query1.kql
+
+$allsaveds= Get-AzOperationalInsightsSavedSearch -ResourceGroupName $rg -WorkspaceName $ws
+
+$alias="ismaeltest2"
+
+ if($alias -in $allsaveds)
+  {
+   New-AzOperationalInsightsSavedSearch -ResourceGroupName $rg -WorkspaceName $ws -SavedSearchId "ismaeltest2" -DisplayName "ismaeltest2" -Category "FunctionWorkspace" -Query $query -Version $fecha -Force -FunctionAlias $alias
+  }else
+  {
+   Set-AzOperationalInsightsSavedSearch -ResourceGroupName $rg -WorkspaceName $ws -SavedSearchId "ismaeltest2" -DisplayName "ismaeltest2" -Category "FunctionWorkspace" -Query $query -Version $fecha -FunctionAlias $alias
+  }
