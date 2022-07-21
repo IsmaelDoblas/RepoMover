@@ -23,5 +23,11 @@ $headers.Add("User-Agent", "powershell/2.0")
             New-Object PsObject -Property $instancetable | Export-Csv C:\VisualStudio\PowerShell\instancesflexibility.csv -append -force
         
     }
+    
+    
+    # Obtain Instance Flexibility Groups
+
+    $reqUrl = 'https://isfratio.blob.core.windows.net/isfratio/ISFRatio.csv'
+    $response = Invoke-RestMethod -Uri $reqUrl -Method Get -ContentType "application/x-www-form-urlencoded" -OutFile "C:\VisualStudio\PowerShell\instancesflexibility.csv"
 
 
