@@ -1,1 +1,4 @@
 https://www.pragimtech.com/blog/azure/azure-app-service-plan/
+
+
+https://github.com/rod-trent/MustLearnKQL
