@@ -2,3 +2,6 @@ https://www.pragimtech.com/blog/azure/azure-app-service-plan/
 
 
 https://github.com/rod-trent/MustLearnKQL
+
+
+https://www.azureblue.io/how-to-create-an-alert-rule-using-powershell-and-azure-cli/
