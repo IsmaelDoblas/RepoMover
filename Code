@@ -1,60 +1,6 @@
-param($Request, $TriggerMetadata)
-
-# Variables required - Fill these out
-$storageAccountName = 'sgtd2weustafinopscomm002'
-$containerName = 'vm-properties'
-$resourceGroupName = 'sgtd2weursgfinopscomm001'
-$subscriptionId = 'ebac6c00-3c2f-4d56-82c0-8057225d44fa'
-
-# Call the atlassian API to get the address ranges
-$Uri   = "https://isfratio.blob.core.windows.net/isfratio/ISFRatio.csv"
-$instancecsv = Invoke-RestMethod $Uri -ErrorAction Stop
-
-# New-TemporaryFile uses [System.IO.Path]::GetTempPath() location
-$tempFile = New-TemporaryFile
-
-# Set the context to the subscription you want to use
-# If your functionApp has access to more than one subscription it will load the first subscription by default.
-# Possibly a good habit to be explicit about context.
-Set-AzContext -Subscription $subscriptionId
-
-# Write the CIDR list to the temp file created earlier
-$instancecsv | Out-File $tempFile
-
-# Create a Storage Context which will be used in the subsequent commands
-$storageContext = New-AzStorageContext -StorageAccountName $storageAccountName
-
-# Upload the temp file to blob storage
-$setAzStorageBlobContentSplat = @{
-    Container  = $containerName
-    File       = $tempFile.FullName
-    Blob       = 'instanceflex.CSV'
-    Context    = $storageContext
-    Properties = @{
-        ContentType = 'text/plain'
-    }
-}
-
-Set-AzStorageBlobContent @setAzStorageBlobContentSplat
-
------------------------------------------------------------------------------------
-
-{
-  "bindings": [
-    {
-      "authLevel": "function",
-      "type": "httpTrigger",
-      "direction": "in",
-      "name": "Request",
-      "methods": [
-        "get",
-        "post"
-      ]
-    },
-    {
-      "type": "http",
-      "direction": "out",
-      "name": "Response"
-    }
-  ]
-}
+#Añadir el CSV al contenedor de Instance Flexibility
+Set-AzStorageBlobContent -File ".\instancesflexibility.csv" `
+  -Container "instances-flexibility" `
+  -Blob "pruebainstance.csv" `
+  -Context $ctx `
+  -Force
