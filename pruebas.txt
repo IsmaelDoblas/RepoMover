@@ -1,15 +1,268 @@
-https://www.pragimtech.com/blog/azure/azure-app-service-plan/
+using System;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Threading.Tasks;
+using System.Security.Cryptography;
+using System.Text;
+using System.Globalization;
+
+using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
+using Azure.Identity;
+using Azure.Security.KeyVault.Secrets;
+using CsvHelper;
 
 
-https://github.com/rod-trent/MustLearnKQL
+public class CostManagementRecord
+{
+    public string InvoiceSectionName{ get; set; }
+    public string AccountName       { get; set; }
+    public string AccountOwnerId    { get; set; }
+    public string SubscriptionId    { get; set; }
+    public string SubscriptionName  { get; set; }
+    public string ResourceGroup     { get; set; }
+    public string ResourceLocation  { get; set; }
+    public DateTime Date            { get; set; }
+    public string ProductName       { get; set; }
+    public string MeterCategory     { get; set; }
+    public string MeterSubCategory  { get; set; }
+    public string MeterId           { get; set; }
+    public string MeterName         { get; set; }
+    public string MeterRegion       { get; set; }
+    public string UnitOfMeasure     { get; set; }
+    public float Quantity           { get; set; }
+    public float EffectivePrice     { get; set; }
+    public float CostInBillingCurrency { get; set; }
+    public string CostCenter        { get; set; }
+    public string ConsumedService   { get; set; }
+    public string ResourceId        { get; set; }
+    public string Tags              { get; set; }
+    public string OfferId           { get; set; }
+    public string AdditionalInfo    { get; set; }
+    public string ServiceInfo1      { get; set; }
+    public string ServiceInfo2      { get; set; }
+    public string ResourceName      { get; set; }
+    public string ReservationId     { get; set; }
+    public string ReservationName   { get; set; }
+    public float UnitPrice          { get; set; }
+    public string ProductOrderId    { get; set; }
+    public string ProductOrderName  { get; set; }
+    public string Term              { get; set; }
+    public string PublisherType     { get; set; }
+    public string PublisherName     { get; set; }
+    public string ChargeType        { get; set; }
+    public string Frequency         { get; set; }
+    public string PricingModel      { get; set; }
+    public string AvailabilityZone  { get; set; }
+    public string BillingAccountId  { get; set; }
+    public string BillingAccountName    { get; set; }
+    public string BillingCurrencyCode   { get; set; }
+    public DateTime BillingPeriodStartDate  { get; set; }
+    public DateTime BillingPeriodEndDate    { get; set; }
+    public string BillingProfileId          { get; set; }
+    public string BillingProfileName        { get; set; }
+    public string InvoiceSectionId          { get; set; }
+    public string IsAzureCreditEligible     { get; set; }
+    public string PartNumber                { get; set; }
+    public string PayGPrice                 { get; set; }
+    public string PlanName                  { get; set; }
+    public string ServiceFamily             { get; set; }
+    public string CostAllocationRuleName    { get; set; }
+    public string FileName                  { get; set; }
+    public string benefitId                 { get; set; }
+    public string benefitName               { get; set; }
+}
 
+public class CostManagementInfo
+{
+    public string FileName          { get; set; }
+    public long NumRecords          { get; set; }
+    public DateTime Date            { get; set; }
+}
 
-https://www.azureblue.io/how-to-create-an-alert-rule-using-powershell-and-azure-cli/
+public class ApiCosts
+{
+    ILogger log;
 
-2015-01-01T00:00:00.000
+    // LogName is custom log name destination in LogAnalytics
+    public string LogName;
 
+    // LogNameInfo is custom log name information destination in LogAnalytics
+    public string LogNameInfo;
 
-GMS	PagoNext Merchant	España
-GTS	PagoNext Trade	España
-SSD	PagoNext SuperDigital	España
-PGX	PagoNext Consumer Shared Services	España
+    // You can use an optional field to specify the timestamp from the data. If the time field is not specified, Azure Monitor assumes the time is the message ingestion time
+    static string TimeStampField = "";
+
+    public ApiCosts(ILogger cLog)
+    {   
+        log         = cLog;
+        LogName     = Environment.GetEnvironmentVariable("COST_LOGS_TABLE");
+        LogNameInfo = Environment.GetEnvironmentVariable("COST_LOGS_INFO_TABLE");
+        log.LogInformation($"LogAnalytics destination: {LogName}");
+    }
+
+    public async Task<string> GetKeyVault(string keyVaultName, string secretName)
+    {
+        try
+        {
+            var kvUri = $"https://{keyVaultName}.vault.azure.net";
+            var client = new SecretClient(new Uri(kvUri), new DefaultAzureCredential());
+            KeyVaultSecret secret = await client.GetSecretAsync(secretName);
+            return secret.Value;
+        }
+        catch (Exception excep)
+        {
+            log.LogError($"Exception KeyVault: {excep})");
+            return "";
+        }
+    }
+
+    public async Task Execute(string dataJson, int numLine, string logFileName, string customerId, string sharedKey)
+    {
+        // Create a hash for the API signature
+        var datestring = DateTime.UtcNow.ToString("r");
+        var jsonBytes = Encoding.UTF8.GetBytes(dataJson);
+
+        string stringToHash = "POST\n" + jsonBytes.Length + "\napplication/json\n" + "x-ms-date:" + datestring + "\n/api/logs";
+        string hashedString = BuildSignature(stringToHash, sharedKey);
+        string signature = "SharedKey " + customerId + ":" + hashedString;
+
+        try {
+            await PostData(log, signature, datestring, dataJson, numLine, logFileName, customerId);
+        }
+        catch (Exception excep)
+        {
+            log.LogError($"The line: {numLine} could not be processed (Error in ApiCosts method: {excep.InnerException}");
+        }
+    }
+
+    // Build the API signature
+    public static string BuildSignature(string message, string secret)
+    {
+        var encoding = new System.Text.ASCIIEncoding();
+        byte[] keyByte = Convert.FromBase64String(secret);
+        byte[] messageBytes = encoding.GetBytes(message);
+        using (var hmacsha256 = new HMACSHA256(keyByte))
+        {
+            byte[] hash = hmacsha256.ComputeHash(messageBytes);
+            return Convert.ToBase64String(hash);
+        } 
+    }
+
+    // Send a request to the POST API endpoint
+    public static async Task PostData(ILogger log, string signature, string date, string json, int numLine, string logFileName, string customerIdPost)
+    {
+        try
+        {
+            string url = "https://" + customerIdPost + ".ods.opinsights.azure.com/api/logs?api-version=2016-04-01";
+
+            HttpClient client = new HttpClient();
+            client.DefaultRequestHeaders.Add("Accept", "application/json");
+            client.DefaultRequestHeaders.Add("Log-Type", logFileName);
+            client.DefaultRequestHeaders.Add("Authorization", signature);
+            client.DefaultRequestHeaders.Add("x-ms-date", date);
+            client.DefaultRequestHeaders.Add("time-generated-field", TimeStampField);
+            client.DefaultRequestHeaders.ConnectionClose = true;
+
+            System.Net.Http.HttpContent httpContent = new StringContent(json, Encoding.UTF8);
+            httpContent.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            
+            await client.PostAsync(new Uri(url), httpContent);
+        }
+        catch (Exception excep)
+        {
+            log.LogError($"Line: {numLine} could not be processed (Error in PostData method: {excep.InnerException})");
+        }
+    }
+}
+
+public static async Task Run(Stream myBlob, string name, ILogger log)
+{
+    log.LogInformation($"C# Blob trigger function processed: {name}"); 
+
+    var recordInfo = new CostManagementInfo();
+    recordInfo.FileName = name;
+
+    if (name.Substring(name.Length - 4).ToUpper() != ".CSV")
+    {
+        log.LogInformation("File does not contain CSV extension");
+        return;
+    }
+
+    ApiCosts apicall = new ApiCosts(log);
+    
+    // Get secrets KeyVault
+    string customerId = await apicall.GetKeyVault(Environment.GetEnvironmentVariable("KEY_VAULT_NAME"), Environment.GetEnvironmentVariable("KEY_VAULT_LA_WS_ID"));                                    
+    string sharedKey  = await apicall.GetKeyVault(Environment.GetEnvironmentVariable("KEY_VAULT_NAME"), Environment.GetEnvironmentVariable("KEY_VAULT_LA_WS_KEY"));                                        
+    
+    using (var sr = new StreamReader(myBlob))
+    {
+        var config = new CsvHelper.Configuration.CsvConfiguration(CultureInfo.InvariantCulture)
+        {
+            HeaderValidated = null,
+            MissingFieldFound = null
+        };
+
+        var csvReader = new CsvReader(sr, config);
+
+        int numLines = 0;
+        int count1000 = 0;
+        int countBatch = 0;
+        var records =new List<CostManagementRecord>();
+
+        // while there is content in the file 
+        while (csvReader.Read())
+        {   
+            try
+            {
+                var record = csvReader.GetRecord<CostManagementRecord>();
+                var dateLimit = DateTime.Now.AddDays(-5); 
+
+                if (record.Date.Year == dateLimit.Year & record.Date.Month == dateLimit.Month & record.Date.Day == dateLimit.Day)
+                {
+                    record.FileName = name;
+                    records.Add(record);
+                    countBatch += 1;
+
+                    recordInfo.Date = dateLimit.Date;
+                    
+                    if (countBatch >= 1000)
+                    {
+                        //serialize the content from CSV back into JSON 
+                        string response = Newtonsoft.Json.JsonConvert.SerializeObject(records);
+                        await apicall.Execute(response, numLines, apicall.LogName, customerId, sharedKey);
+
+                        countBatch = 0;
+                        records.Clear();
+                    }
+                    numLines += 1;
+                    count1000 += 1;
+                }
+            }
+            catch (Exception excep)
+            {
+                log.LogError($"C# Queue trigger function processed: {excep.Message} (Error in Run method)");
+            }                   
+
+            if (count1000 >= 1000)
+            {
+                log.LogInformation($"Partial count: {numLines} lines added");
+                count1000 = 0;
+            }
+        }
+
+        if (records.Count > 0) 
+        {
+            string response = Newtonsoft.Json.JsonConvert.SerializeObject(records);
+            await apicall.Execute(response, numLines, apicall.LogName, customerId, sharedKey);
+        }
+        records.Clear();
+
+        recordInfo.NumRecords = numLines;
+        string responseInfo = Newtonsoft.Json.JsonConvert.SerializeObject(recordInfo);
+        await apicall.Execute(responseInfo, 1, apicall.LogNameInfo, customerId, sharedKey); 
+
+        log.LogInformation($"CSV file processed, {numLines} new lines added");       
+    }
+}
