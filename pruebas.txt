@@ -1,18 +1,12 @@
+#r "Newtonsoft.Json" 
+using CsvHelper;
 using System;
-using System.Net;
-using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Threading.Tasks;
-using System.Security.Cryptography;
-using System.Text;
+using System.Net.Http.Headers;          // Http classes: MediaTypeHeaderValue
+using System.Security.Cryptography;     // Cryptography classes: HMACSHA256
+using System.Text;                      // Encoding methods 
 using System.Globalization;
 
-using Azure.Storage.Blobs;
-using Azure.Storage.Blobs.Models;
-using Azure.Identity;
-using Azure.Security.KeyVault.Secrets;
-using CsvHelper;
-
+ 
 
 public class CostManagementRecord
 {
@@ -70,8 +64,6 @@ public class CostManagementRecord
     public string ServiceFamily             { get; set; }
     public string CostAllocationRuleName    { get; set; }
     public string FileName                  { get; set; }
-    public string benefitId                 { get; set; }
-    public string benefitName               { get; set; }
 }
 
 public class CostManagementInfo
@@ -96,33 +88,19 @@ public class ApiCosts
 
     public ApiCosts(ILogger cLog)
     {   
-        log         = cLog;
-        LogName     = Environment.GetEnvironmentVariable("COST_LOGS_TABLE");
-        LogNameInfo = Environment.GetEnvironmentVariable("COST_LOGS_INFO_TABLE");
+        log = cLog;
+        LogName = "CostLogs_Test001_CL"; //Environment.GetEnvironmentVariable("varLogNameTable", EnvironmentVariableTarget.Process);             //"CostLogsTest111_CL "; "CostLogs_CL"
+        LogNameInfo = "CostLogsInfo_Test001_CL";  //Environment.GetEnvironmentVariable("varLogNameInfoTable", EnvironmentVariableTarget.Process);     //"CostLogsInfoTest111_CL "; "CostLogsInfo_CL"
         log.LogInformation($"LogAnalytics destination: {LogName}");
     }
 
-    public async Task<string> GetKeyVault(string keyVaultName, string secretName)
-    {
-        try
-        {
-            var kvUri = $"https://{keyVaultName}.vault.azure.net";
-            var client = new SecretClient(new Uri(kvUri), new DefaultAzureCredential());
-            KeyVaultSecret secret = await client.GetSecretAsync(secretName);
-            return secret.Value;
-        }
-        catch (Exception excep)
-        {
-            log.LogError($"Exception KeyVault: {excep})");
-            return "";
-        }
-    }
-
-    public async Task Execute(string dataJson, int numLine, string logFileName, string customerId, string sharedKey)
+    public async Task Execute(string dataJson, int numLine, string logFileName)
     {
         // Create a hash for the API signature
         var datestring = DateTime.UtcNow.ToString("r");
         var jsonBytes = Encoding.UTF8.GetBytes(dataJson);
+        var customerId = "b5618e86-1ccb-4212-8ba6-e4af4065877a";   //Environment.GetEnvironmentVariable("varCustomerIdFromKeyVault", EnvironmentVariableTarget.Process);
+        var sharedKey = "E1Od5L+SMUHl7JbBqz3pF7DLpcsk6sHGSdaxPZ5ICJVfa5df+R4eGjtwfs8ggnxiaweMEbdz6Xqvmu5ZRmaMyA==";  //Environment.GetEnvironmentVariable("varSharedKeyFromKeyVault", EnvironmentVariableTarget.Process);
 
         string stringToHash = "POST\n" + jsonBytes.Length + "\napplication/json\n" + "x-ms-date:" + datestring + "\n/api/logs";
         string hashedString = BuildSignature(stringToHash, sharedKey);
@@ -192,10 +170,6 @@ public static async Task Run(Stream myBlob, string name, ILogger log)
 
     ApiCosts apicall = new ApiCosts(log);
     
-    // Get secrets KeyVault
-    string customerId = await apicall.GetKeyVault(Environment.GetEnvironmentVariable("KEY_VAULT_NAME"), Environment.GetEnvironmentVariable("KEY_VAULT_LA_WS_ID"));                                    
-    string sharedKey  = await apicall.GetKeyVault(Environment.GetEnvironmentVariable("KEY_VAULT_NAME"), Environment.GetEnvironmentVariable("KEY_VAULT_LA_WS_KEY"));                                        
-    
     using (var sr = new StreamReader(myBlob))
     {
         var config = new CsvHelper.Configuration.CsvConfiguration(CultureInfo.InvariantCulture)
@@ -231,7 +205,7 @@ public static async Task Run(Stream myBlob, string name, ILogger log)
                     {
                         //serialize the content from CSV back into JSON 
                         string response = Newtonsoft.Json.JsonConvert.SerializeObject(records);
-                        await apicall.Execute(response, numLines, apicall.LogName, customerId, sharedKey);
+                        await apicall.Execute(response, numLines, apicall.LogName);
 
                         countBatch = 0;
                         records.Clear();
@@ -255,13 +229,13 @@ public static async Task Run(Stream myBlob, string name, ILogger log)
         if (records.Count > 0) 
         {
             string response = Newtonsoft.Json.JsonConvert.SerializeObject(records);
-            await apicall.Execute(response, numLines, apicall.LogName, customerId, sharedKey);
+            await apicall.Execute(response, numLines, apicall.LogName);
         }
         records.Clear();
 
         recordInfo.NumRecords = numLines;
         string responseInfo = Newtonsoft.Json.JsonConvert.SerializeObject(recordInfo);
-        await apicall.Execute(responseInfo, 1, apicall.LogNameInfo, customerId, sharedKey); 
+        await apicall.Execute(responseInfo, 1, apicall.LogNameInfo); 
 
         log.LogInformation($"CSV file processed, {numLines} new lines added");       
     }
